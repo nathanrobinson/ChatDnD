@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Initialize the official Google Gen AI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -25,7 +26,7 @@ app.post('/chat-bot', async (req, res) => {
 
     // Verify this is a user message event from Google Chat
     if (!event || event.type !== 'MESSAGE') {
-      return res.status(200).send();
+      return res.json({ text: "🧙‍♂️ *The DM leans forward:* did you say something?" });
     }
 
     // Extract conversation context identifiers from Google Chat payload
