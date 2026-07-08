@@ -30,7 +30,26 @@ app.post('/chat-bot', async (req, res) => {
 
     // Extract conversation context identifiers from Google Chat payload
     const threadId = event.message?.thread?.name || event.space?.name || 'default-session';
-    const userMessage = event.message?.argumentText || event.message?.text || '';
+
+    // FIX: Extract clean text. Direct messages use text, mentions have formatting properties.
+    let userMessage = event.message?.text || '';
+
+    // If it's a mention in a space, strip out the bot's name so Gemini doesn't get confused
+    if (event.message?.annotations) {
+      event.message.annotations.forEach(annotation => {
+        if (annotation.type === 'USER_MENTION' && annotation.userMention?.type === 'BOT') {
+          // Strips the "@ChatDnD " mention tag cleanly from the start
+          userMessage = userMessage.replace(annotation.userMention.user.name, '').trim();
+        }
+      });
+    }
+
+    // Add a quick guard to see if we parsed nothing
+    if (!userMessage || userMessage.trim() === '') {
+      return res.json({ text: "🧙‍♂️ *The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?" });
+    }
+
+    console.log(`[Thread: ${threadId}] Processed Player Input: "${userMessage}"`);
 
     // 1. Retrieve or initialize the historic conversation log for this thread
     if (!sessionHistories.has(threadId)) {
@@ -56,6 +75,7 @@ app.post('/chat-bot', async (req, res) => {
     });
 
     const botReply = response.text;
+    console.log(`[Thread: ${threadId}] Processed bot response ${botReply}`);
 
     // 4. Append the model's response to the history log to preserve state for the next turn
     history.push({
