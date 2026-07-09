@@ -21,6 +21,41 @@ bullet points, or brief paragraphs so they are easy to scan in a chat window.
 Adhere strictly to 5e rules, track relative distances, and ask for specific dice rolls and offer to roll when necessary.
 `;
 
+/**
+ * Formats a plain text string into the card structure required by the Google Workspace Add-ons API.
+ * @param {string} textContent - The message text or DM narration.
+ * @returns {object} The structured JSON payload for Google Chat.
+ */
+function formatChatResponse(textContent) {
+  return {
+    renderActions: {
+      action: {
+        navigations: [
+          {
+            pushCard: {
+              header: {
+                title: "🧙‍♂️ Dungeon Master",
+                imageUrl: "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg"
+              },
+              sections: [
+                {
+                  widgets: [
+                    {
+                      textParagraph: {
+                        text: textContent
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  };
+}
+
 app.post('/chat-bot', async (req, res) => {
   try {
 
@@ -37,13 +72,9 @@ app.post('/chat-bot', async (req, res) => {
     const chatMessage = payload.chat.messagePayload.message;
     const userMessage = chatMessage.argumentText || chatMessage.text || "";
 
-    console.log(`Processed Player Input: "${userMessage.trim()}"`);
-
     // 3. Text Validation Guard Clause
     if (!userMessage || userMessage.trim() === '') {
-      return res.json({ 
-        text: "🧙‍♂️ *The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?" 
-      });
+      return res.json(formatChatResponse("*The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?"));
     }
 
     const threadId = chatMessage.thread?.name || chatMessage.space?.name || "global-fallback";
@@ -72,7 +103,7 @@ app.post('/chat-bot', async (req, res) => {
     });
 
     const botReply = response.text;
-    console.log(`[Thread: ${threadId}] Processed bot response ${botReply}`);
+    console.log(`[Thread: ${threadId}] Processed bot response`);
 
     // 4. Append the model's response to the history log to preserve state for the next turn
     history.push({
@@ -88,11 +119,11 @@ app.post('/chat-bot', async (req, res) => {
     }
 
     // 6. Return response payload back to Google Chat
-    return res.json({ text: botReply });
+    return res.json(formatChatResponse(botReply));
 
   } catch (error) {
     console.error('Error processing chat event:', error);
-    return res.json({ text: "🧙‍♂️ *The DM stalls:* An error occurred while calculating your fate. Please try again." });
+    return res.json(formatChatResponse("*The DM stalls:* An error occurred while calculating your fate. Please try again."));
   }
 });
 
