@@ -24,14 +24,22 @@ Adhere strictly to 5e rules, track relative distances, and ask for specific dice
 /**
  * Formats a plain text string into the card structure required by the Google Workspace Add-ons API.
  * @param {string} textContent - The message text or DM narration.
+ * @param {object} [threadContext] - The thread object from the incoming event payload.
  * @returns {object} The structured JSON payload for Google Chat.
  */
-function formatChatResponse(textContent) {
-  return {
+function formatChatResponse(textContent, threadContext) {
+  // Guard clause: Google Chat cards will throw an error if text content is missing or empty
+  const safeText = textContent ? String(textContent) : "The DM remains silent...";
+
+  const response = {
+    // Tells Google Chat to create a message response
+    actionResponse: {
+      type: "NEW_MESSAGE" 
+    },
     cardsV2: [
       {
         cardId: "dmResponseCard",
-        card: {
+        card: { 
           header: {
             title: "🧙‍♂️ Dungeon Master",
             imageUrl: "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg"
@@ -41,7 +49,7 @@ function formatChatResponse(textContent) {
               widgets: [
                 {
                   textParagraph: {
-                    text: textContent
+                    text: safeText
                   }
                 }
               ]
@@ -51,11 +59,20 @@ function formatChatResponse(textContent) {
       }
     ]
   };
+
+  // If we are in a space, attach the thread identifier so it replies in the same thread
+  if (threadContext) {
+    response.thread = threadContext;
+  }
+
+  return response;
 }
 
 app.post('/chat-bot', async (req, res) => {
-  try {
+  // Pull the raw thread structure early for fallback error responses
+  let threadContext = null;
 
+  try {
     const payload = req.body;
 
     // 1. Updated Guard Clause to match the Add-on event structure
@@ -68,13 +85,19 @@ app.post('/chat-bot', async (req, res) => {
     // 2. Extract the text cleanly using the exact nested path from the logs
     const chatMessage = payload.chat.messagePayload.message;
     const userMessage = chatMessage.argumentText || chatMessage.text || "";
+    
+    // Capture the exact thread object context sent by Google Chat
+    threadContext = chatMessage.thread; 
 
     // 3. Text Validation Guard Clause
     if (!userMessage || userMessage.trim() === '') {
-      return res.json(formatChatResponse("*The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?"));
+      return res.json(formatChatResponse(
+        "*The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?",
+        threadContext
+      ));
     }
 
-    const threadId = chatMessage.thread?.name || chatMessage.space?.name || "global-fallback";
+    const threadId = threadContext?.name || chatMessage.space?.name || "global-fallback";
 
     // 1. Retrieve or initialize the historic conversation log for this thread
     if (!sessionHistories.has(threadId)) {
@@ -89,8 +112,6 @@ app.post('/chat-bot', async (req, res) => {
     });
 
     // 3. Request generation from Gemini.
-    // By providing the entire historic array and system instructions,
-    // Google's implicit caching will auto-activate once the context surpasses the token threshold.
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash', // Optimal cost/speed model for conversational flows
       contents: history,
@@ -108,19 +129,22 @@ app.post('/chat-bot', async (req, res) => {
       parts: [{ text: botReply }]
     });
 
-    // 5. Keep memory optimized (Optional: keep only last 30 turns to fit free-tier memory comfortably)
+    // 5. Keep memory optimized (keep only last 30 turns to fit free-tier memory comfortably)
     if (history.length > 60) { 
       // Removes oldest user/model turn pair
       history.shift();
       history.shift();
     }
 
-    // 6. Return response payload back to Google Chat
-    return res.json(formatChatResponse(botReply));
+    // 6. Return response payload back to Google Chat with thread anchoring
+    return res.json(formatChatResponse(botReply, threadContext));
 
   } catch (error) {
     console.error('Error processing chat event:', error);
-    return res.json(formatChatResponse("*The DM stalls:* An error occurred while calculating your fate. Please try again."));
+    return res.json(formatChatResponse(
+      "*The DM stalls:* An error occurred while calculating your fate. Please try again.",
+      threadContext
+    ));
   }
 });
 
