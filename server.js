@@ -3,29 +3,8 @@ import { GoogleGenAI } from '@google/genai';
 
 const app = express();
 
-// 1. RAW LOGGING MIDDLEWARE (Put this first)
-app.use((req, res, next) => {
-  console.log("=== NEW INCOMING REQUEST ===");
-  console.log(`Method: ${req.method} | URL: ${req.url}`);
-  console.log("Headers:", JSON.stringify(req.headers, null, 2));
-  
-  // Note: req.body will be undefined here because body-parsers haven't run yet.
-  // If you want to log the text body after parsing, we do that below.
-  next();
-});
-
-// 2. BODY PARSERS
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// 3. PARSED BODY LOGGING MIDDLEWARE
-app.use((req, res, next) => {
-  if (req.url === '/chat-bot') {
-    console.log("=== PARSED REQUEST BODY ===");
-    console.log(JSON.stringify(req.body, null, 2));
-  }
-  next();
-});
 
 // Initialize the official Google Gen AI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -44,35 +23,28 @@ Adhere strictly to 5e rules, track relative distances, and ask for specific dice
 
 app.post('/chat-bot', async (req, res) => {
   try {
-    const event = req.body;
 
-    // Verify this is a user message event from Google Chat
-    if (!event || event.type !== 'MESSAGE') {
-      return res.json({ text: "🧙‍♂️ *The DM leans forward:* did you say something?" });
+    const payload = req.body;
+
+    // 1. Updated Guard Clause to match the Add-on event structure
+    // Verify that it's a Chat app host event and contains a message layout
+    if (payload?.commonEventObject?.hostApp !== 'CHAT' || !payload?.chat?.messagePayload?.message) {
+      console.log("--> Dropped: Request is missing valid Google Chat structure.");
+      return res.status(200).send();
     }
 
-    // Extract conversation context identifiers from Google Chat payload
-    const threadId = event.message?.thread?.name || event.space?.name || 'default-session';
+    // 2. Extract the text cleanly using the exact nested path from the logs
+    const chatMessage = payload.chat.messagePayload.message;
+    const userMessage = chatMessage.argumentText || chatMessage.text || "";
 
-    // FIX: Extract clean text. Direct messages use text, mentions have formatting properties.
-    let userMessage = event.message?.text || '';
+    console.log(`Processed Player Input: "${userMessage.trim()}"`);
 
-    // If it's a mention in a space, strip out the bot's name so Gemini doesn't get confused
-    if (event.message?.annotations) {
-      event.message.annotations.forEach(annotation => {
-        if (annotation.type === 'USER_MENTION' && annotation.userMention?.type === 'BOT') {
-          // Strips the "@ChatDnD " mention tag cleanly from the start
-          userMessage = userMessage.replace(annotation.userMention.user.name, '').trim();
-        }
+    // 3. Text Validation Guard Clause
+    if (!userMessage || userMessage.trim() === '') {
+      return res.json({ 
+        text: "🧙‍♂️ *The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?" 
       });
     }
-
-    // Add a quick guard to see if we parsed nothing
-    if (!userMessage || userMessage.trim() === '') {
-      return res.json({ text: "🧙‍♂️ *The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?" });
-    }
-
-    console.log(`[Thread: ${threadId}] Processed Player Input: "${userMessage}"`);
 
     // 1. Retrieve or initialize the historic conversation log for this thread
     if (!sessionHistories.has(threadId)) {
