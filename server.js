@@ -2,8 +2,30 @@ import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 
 const app = express();
+
+// 1. RAW LOGGING MIDDLEWARE (Put this first)
+app.use((req, res, next) => {
+  console.log("=== NEW INCOMING REQUEST ===");
+  console.log(`Method: ${req.method} | URL: ${req.url}`);
+  console.log("Headers:", JSON.stringify(req.headers, null, 2));
+  
+  // Note: req.body will be undefined here because body-parsers haven't run yet.
+  // If you want to log the text body after parsing, we do that below.
+  next();
+});
+
+// 2. BODY PARSERS
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// 3. PARSED BODY LOGGING MIDDLEWARE
+app.use((req, res, next) => {
+  if (req.url === '/chat-bot') {
+    console.log("=== PARSED REQUEST BODY ===");
+    console.log(JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
 
 // Initialize the official Google Gen AI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
