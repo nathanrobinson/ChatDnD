@@ -28,31 +28,28 @@ Adhere strictly to 5e rules, track relative distances, and ask for specific dice
  */
 function formatChatResponse(textContent) {
   return {
-    renderActions: {
-      action: {
-        navigations: [
-          {
-            pushCard: {
-              header: {
-                title: "🧙‍♂️ Dungeon Master",
-                imageUrl: "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg"
-              },
-              sections: [
+    cardsV2: [
+      {
+        cardId: "dmResponseCard",
+        card: {
+          header: {
+            title: "🧙‍♂️ Dungeon Master",
+            imageUrl: "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg"
+          },
+          sections: [
+            {
+              widgets: [
                 {
-                  widgets: [
-                    {
-                      textParagraph: {
-                        text: textContent
-                      }
-                    }
-                  ]
+                  textParagraph: {
+                    text: textContent
+                  }
                 }
               ]
             }
-          }
-        ]
+          ]
+        }
       }
-    }
+    ]
   };
 }
 
