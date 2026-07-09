@@ -24,6 +24,29 @@ If players don't have saved player cards, generate one for them.
 `;
 
 /**
+ * Converts standard Markdown syntax into Google Chat Card compatible HTML tags.
+ * @param {string} mdText - The raw markdown text from the AI model.
+ * @returns {string} The formatted HTML string.
+ */
+function convertMarkdownToChatHtml(mdText) {
+  if (!mdText) return "";
+
+  return (
+    mdText
+      // 1. Convert Bold (**text** or __text__) to <b>text</b>
+      .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+      .replace(/__(.*?)__/g, "<b>$1</b>")
+
+      // 2. Convert Italics (*text* or _text_) to <i>text</i>
+      .replace(/\*(.*?)\*/g, "<i>$1</i>")
+      .replace(/_(.*?)_/g, "<i>$1</i>")
+
+      // 3. Convert Linebreaks into explicit HTML breaks
+      .replace(/\n/g, "<br>")
+  );
+}
+
+/**
  * Formats a plain text string into a card structure containing an interactive response text input.
  * @param {string} textContent - The message text or DM narration.
  * @param {object} [threadContext] - The thread object from the incoming event payload.
@@ -31,7 +54,7 @@ If players don't have saved player cards, generate one for them.
  */
 function formatChatResponse(textContent, threadContext) {
   const safeText = textContent
-    ? String(textContent)
+    ? convertMarkdownToChatHtml(textContent)
     : "The DM remains silent...";
 
   const messageData = {
