@@ -46,6 +46,8 @@ app.post('/chat-bot', async (req, res) => {
       });
     }
 
+    const threadId = chatMessage.thread?.name || chatMessage.space?.name || "global-fallback";
+
     // 1. Retrieve or initialize the historic conversation log for this thread
     if (!sessionHistories.has(threadId)) {
       sessionHistories.set(threadId, []);
