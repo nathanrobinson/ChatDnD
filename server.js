@@ -50,10 +50,11 @@ function convertMarkdownToChatHtml(mdText) {
  * Formats a plain text string into a card structure containing an interactive response text input.
  * @param {string} textContent - The message text or DM narration.
  * @param {object} [threadContext] - The thread object from the incoming event payload.
+ * @param {boolean} [isCardClick=false] - True if this is responding to a CARD_CLICKED action.
  * @returns {object} The structured JSON payload for Google Chat.
  */
-function formatChatResponse(textContent, threadContext) {
-  const safeText = textContent
+function formatChatResponse(textContent, threadContext, isCardClick = false) {
+  const formattedHtml = textContent
     ? convertMarkdownToChatHtml(textContent)
     : "The DM remains silent...";
 
@@ -68,24 +69,22 @@ function formatChatResponse(textContent, threadContext) {
               "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg",
           },
           sections: [
-            // Section 1: The DM's Narration Text
             {
               widgets: [
                 {
                   textParagraph: {
-                    text: safeText,
+                    text: formattedHtml,
                   },
                 },
               ],
             },
-            // Section 2: The Action Input Form
             {
               widgets: [
                 {
                   textInput: {
-                    name: "playerActionInput", // The key name your server will look for
+                    name: "playerActionInput",
                     label: "What do you do?",
-                    type: "MULTIPLE_LINE", // Allows multi-line typing
+                    type: "MULTIPLE_LINE",
                     placeholderText:
                       "Type your action here (e.g., I draw my sword and attack)...",
                   },
@@ -97,7 +96,7 @@ function formatChatResponse(textContent, threadContext) {
                         text: "Send Action to DM",
                         onClick: {
                           action: {
-                            function: "SUBMIT_ACTION", // Custom tracking tag for your endpoint
+                            function: "SUBMIT_ACTION",
                           },
                         },
                       },
@@ -116,47 +115,61 @@ function formatChatResponse(textContent, threadContext) {
     messageData.thread = threadContext;
   }
 
+  // FIXED ENVELOPE WATERFALL
+  if (isCardClick) {
+    return {
+      actionResponse: {
+        type: "NEW_MESSAGE",
+      },
+      ...messageData,
+    };
+  }
+
   return {
     hostAppDataAction: {
-      chatDataAction: { createMessageAction: { message: messageData } },
+      chatDataAction: {
+        createMessageAction: {
+          message: messageData,
+        },
+      },
     },
   };
 }
 
 app.post("/chat-bot", async (req, res) => {
   let threadContext = null;
+  let isCardResponse = false;
 
   try {
     const payload = req.body;
 
-    // 1. Verify that it's a Chat app host event and contains a message layout
-    if (
-      payload?.commonEventObject?.hostApp !== "CHAT" ||
-      !payload?.chat?.messagePayload?.message
-    ) {
+    // 1. Loosened validation to correctly capture CARD_CLICKED payload environments
+    if (payload?.commonEventObject?.hostApp !== "CHAT") {
       console.log(
         "--> Dropped: Request is missing valid Google Chat structure.",
       );
       return res.status(200).send();
     }
 
-    // 2. Extract the text cleanly using the nested path from the Workspace Add-on logs
+    isCardResponse = payload.type === "CARD_CLICKED";
     let userMessage = "";
-    const incomingMessage = payload.chat?.messagePayload?.message;
 
-    // 2-a. Check if the event came from your text box button click
-    if (payload.type === "CARD_CLICKED") {
-      // Pull the exact value by the 'name' attribute we assigned ("playerActionInput")
+    // ✅ FIXED STRUCTURES: Safely evaluate where the message container is located
+    const incomingChatMessage = payload.chat?.messagePayload?.message;
+    const incomingCardMessage =
+      payload.commonEventObject?.messageToInteractiveCard;
+
+    if (isCardResponse) {
+      // Pull form value by the 'name' attribute we assigned ("playerActionInput")
       const formInputs = payload.commonEventObject?.formInputs;
       userMessage = formInputs?.playerActionInput?.stringInputs?.value[0] || "";
 
-      // Grab the thread info from the event object roots
-      threadContext = incomingMessage?.thread;
+      // Extract thread out of the interactive card event context block
+      threadContext = incomingCardMessage?.thread;
     } else {
-      // 2-b. Fall back to standard text entry / @mentions
       userMessage =
-        incomingMessage?.argumentText || incomingMessage?.text || "";
-      threadContext = incomingMessage?.thread;
+        incomingChatMessage?.argumentText || incomingChatMessage?.text || "";
+      threadContext = incomingChatMessage?.thread;
     }
 
     // 3. Text Validation Guard Clause
@@ -165,18 +178,19 @@ app.post("/chat-bot", async (req, res) => {
         formatChatResponse(
           "*The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?",
           threadContext,
+          isCardResponse,
         ),
       );
     }
 
-    // Safely parse the unique ID representing this specific chat room/space
+    // Safely parse space path string out of whichever block holds it
     const threadId =
       payload.chat?.messagePayload?.space?.name ||
-      incomingMessage?.space?.name ||
+      incomingChatMessage?.space?.name ||
+      incomingCardMessage?.space?.name ||
       "global-fallback";
 
-    // Clean up the slash characters in the Google space name ("spaces/XXXXXX" -> "spaces-XXXXXX")
-    // to prevent Firestore from treating it as subdirectories
+    // Flatten slash characters so Firestore doesn't process deep collections paths
     const docId = threadId.replace(/\//g, "-");
     const docRef = db.collection(CHAT_HISTORY_COLLECTION).doc(docId);
 
@@ -196,7 +210,7 @@ app.post("/chat-bot", async (req, res) => {
 
     // 6. Request generation from Gemini
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash", // Optimal cost/speed model for conversational flows
+      model: "gemini-2.5-flash",
       contents: history,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -206,13 +220,13 @@ app.post("/chat-bot", async (req, res) => {
     const botReply = response.text;
     console.log(`[Thread: ${docId}] Processed bot response`);
 
-    // 7. Append the model's response to the history log to preserve state for the next turn
+    // 7. Append the model's response to the history log
     history.push({
       role: "model",
       parts: [{ text: botReply }],
     });
 
-    // 8. Keep memory optimized to manage Firestore document size limit (1MB max per document)
+    // 8. Keep memory optimized (Firestore limit is 1MB per doc)
     if (history.length > 40) {
       history = history.slice(-40);
     }
@@ -226,15 +240,17 @@ app.post("/chat-bot", async (req, res) => {
       { merge: true },
     );
 
-    // 10. Return response payload back to Google Chat wrapped in the Add-on action envelope
-    return res.json(formatChatResponse(botReply, threadContext));
+    // 10. Return response payload back safely
+    return res.json(
+      formatChatResponse(botReply, threadContext, isCardResponse),
+    );
   } catch (error) {
     console.error("Error processing chat event:", error);
-    // Safe fall-back reply so the webhook doesn't time out or throw a Console Code 3
     return res.json(
       formatChatResponse(
         "*The DM stalls:* An error occurred while calculating your fate. Please try again.",
         threadContext,
+        isCardResponse,
       ),
     );
   }
