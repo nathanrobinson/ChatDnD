@@ -1,26 +1,7 @@
 {
-  "name": "chatdnd",
-  "version": "1.0.0",
-  "type": "module",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/nathanrobinson/ChatDnD.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/nathanrobinson/ChatDnD/issues"
-  },
-  "homepage": "https://github.com/nathanrobinson/ChatDnD#readme",
-  "dependencies": {
-    "@google/genai": "^2.10.0",
-    "express": "^5.2.1"
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^10.0.1",
+    "globals": "^17.7.0"
   }
 }
