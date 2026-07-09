@@ -22,13 +22,12 @@ Adhere strictly to 5e rules, track relative distances, and ask for specific dice
 `;
 
 /**
- * Formats a plain text string into the card structure required by the Google Workspace Add-ons API.
+ * Formats a plain text string into a card structure containing an interactive response text input.
  * @param {string} textContent - The message text or DM narration.
  * @param {object} [threadContext] - The thread object from the incoming event payload.
- * @returns {object} The structured JSON payload for Google Chat / Workspace Add-on framework.
+ * @returns {object} The structured JSON payload for Google Chat.
  */
 function formatChatResponse(textContent, threadContext) {
-  // Guard clause: Google Chat cards will throw an error if text content is missing or empty
   const safeText = textContent ? String(textContent) : "The DM remains silent...";
 
   const messageData = {
@@ -41,11 +40,39 @@ function formatChatResponse(textContent, threadContext) {
             imageUrl: "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg"
           },
           sections: [
+            // Section 1: The DM's Narration Text
             {
               widgets: [
                 {
                   textParagraph: {
                     text: safeText
+                  }
+                }
+              ]
+            },
+            // Section 2: The Action Input Form
+            {
+              widgets: [
+                {
+                  textInput: {
+                    name: "playerActionInput", // The key name your server will look for
+                    label: "What do you do?",
+                    type: "MULTIPLE_LINE",     // Allows multi-line typing
+                    placeholderText: "Type your action here (e.g., I draw my sword and attack)..."
+                  }
+                },
+                {
+                  buttonList: {
+                    buttons: [
+                      {
+                        text: "Send Action to DM",
+                        onClick: {
+                          action: {
+                            function: "SUBMIT_ACTION" // Custom tracking tag for your endpoint
+                          }
+                        }
+                      }
+                    ]
                   }
                 }
               ]
@@ -56,21 +83,11 @@ function formatChatResponse(textContent, threadContext) {
     ]
   };
 
-  // If thread data is available from the space, stitch it to the message data framework
   if (threadContext) {
     messageData.thread = threadContext;
   }
 
-  // Wrap inside the correct Add-on architecture envelope
-  return {
-    hostAppDataAction: {
-      chatDataAction: {
-        createMessageAction: {
-          message: messageData
-        }
-      }
-    }
-  };
+  return { hostAppDataAction: { chatDataAction: { createMessageAction: { message: messageData } } } };
 }
 
 app.post('/chat-bot', async (req, res) => {
@@ -86,11 +103,22 @@ app.post('/chat-bot', async (req, res) => {
     }
 
     // 2. Extract the text cleanly using the nested path from the Workspace Add-on logs
-    const chatMessage = payload.chat.messagePayload.message;
-    const userMessage = chatMessage.argumentText || chatMessage.text || "";
+    let userMessage = "";
     
-    // Capture the thread context object sent by Google Chat
-    threadContext = chatMessage.thread; 
+    // 2-a. Check if the event came from your text box button click
+    if (payload.type === 'CARD_CLICKED') {
+      // Pull the exact value by the 'name' attribute we assigned ("playerActionInput")
+      const formInputs = payload.commonEventObject?.formInputs;
+      userMessage = formInputs?.playerActionInput?.stringInputs?.value[0] || "";
+      
+      // Grab the thread info from the event object roots
+      threadContext = payload.chat?.messagePayload?.message?.thread;
+    } else {
+      // 2-b. Fall back to standard text entry / @mentions
+      const chatMessage = payload.chat?.messagePayload?.message;
+      userMessage = chatMessage?.argumentText || chatMessage?.text || "";
+      threadContext = chatMessage?.thread;
+    }
 
     // 3. Text Validation Guard Clause
     if (!userMessage || userMessage.trim() === '') {
@@ -100,7 +128,7 @@ app.post('/chat-bot', async (req, res) => {
       ));
     }
 
-    const threadId = threadContext?.name || chatMessage.space?.name || "global-fallback";
+    const threadId = chatMessage.space?.name || "global-fallback";
 
     // 4. Retrieve or initialize the historic conversation log for this thread
     if (!sessionHistories.has(threadId)) {
