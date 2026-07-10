@@ -111,19 +111,21 @@ function formatChatResponse(textContent, threadContext, isCardClick = false) {
     ],
   };
 
-  if (threadContext) {
-    messageData.thread = threadContext;
-  }
-
-  // FIXED ENVELOPE WATERFALL
+  // ✅ MANIFEST-APPROVED INTERACTIVE CARD RESPONSE SCHEMA
   if (isCardClick) {
     return {
       actionResponse: {
         type: "UPDATE_MESSAGE",
       },
-      // Cards must be nested inside the structural cardsV2 wrapper explicitly
-      cardsV2: messageData.cardsV2,
+      message: {
+        cardsV2: messageData.cardsV2,
+        ...(threadContext ? { thread: threadContext } : {}),
+      },
     };
+  }
+
+  if (threadContext) {
+    messageData.thread = threadContext;
   }
 
   return {
@@ -137,6 +139,117 @@ function formatChatResponse(textContent, threadContext, isCardClick = false) {
   };
 }
 
+/**
+ * Parses a dice string (e.g., "2d6") and evaluates the random rolls.
+ * @param {string} diceText - The dice notation string.
+ * @returns {object} An object containing the individual rolls, the total, and a formatted string.
+ */
+function rollDice(diceText) {
+  const match = diceText.trim().match(/^(\d+)d(\d+)$/i);
+  if (!match) return null;
+
+  const count = parseInt(match[1], 10);
+  const sides = parseInt(match[2], 10);
+
+  if (count < 1 || count > 100 || sides < 2 || sides > 1000) {
+    return { error: "Keep dice count between 1-100 and sides between 2-1000." };
+  }
+
+  const rolls = [];
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    const roll = Math.floor(Math.random() * sides) + 1;
+    rolls.push(roll);
+    total += roll;
+  }
+
+  return {
+    rolls,
+    total,
+    text: `Rolled ${count}d${sides}: [${rolls.join(", ")}] = **${total}**`,
+  };
+}
+
+// ----------------------------------------------------
+// 🎲 NEW COMMAND ENDPOINT
+// ----------------------------------------------------
+app.post("/command", async (req, res) => {
+  try {
+    const payload = req.body;
+
+    if (payload?.commonEventObject?.hostApp !== "CHAT") {
+      return res.status(200).send();
+    }
+
+    const incomingChatMessage = payload.chat?.messagePayload?.message;
+    const threadContext = incomingChatMessage?.thread;
+
+    // Capture unique space paths safely to write to correct log file
+    const threadId =
+      payload.chat?.messagePayload?.space?.name ||
+      incomingChatMessage?.space?.name ||
+      "global-fallback";
+
+    const docId = threadId.replace(/\//g, "-");
+    const docRef = db.collection(CHAT_HISTORY_COLLECTION).doc(docId);
+
+    const commandArgs = (incomingChatMessage?.argumentText || "").trim();
+    const diceResult = rollDice(commandArgs);
+
+    let rollFeedback = "";
+
+    if (diceResult?.error) {
+      rollFeedback = `*The DM sighs:* ${diceResult.error}`;
+    } else if (diceResult) {
+      rollFeedback = `🎲 ${diceResult.text}`;
+
+      // Fetch history log to push context metadata back in
+      const docSnap = await docRef.get();
+      let history = [];
+      if (docSnap.exists) {
+        history = docSnap.data().history || [];
+      }
+
+      // Inject the roll context output explicitly into the history log array
+      history.push({
+        role: "user",
+        parts: [
+          { text: `[SYSTEM: Player rolled dice. Result: ${diceResult.text}]` },
+        ],
+      });
+
+      if (history.length > 40) {
+        history = history.slice(-40);
+      }
+
+      await docRef.set(
+        {
+          history: history,
+          lastUpdated: Firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } else {
+      rollFeedback = `*The DM holds out an empty hand:* Invalid format. Please use \`/roll {n}d{s}\` (e.g., \`/roll 1d20\` or \`/roll 2d6\`).`;
+    }
+
+    // Return the response back cleanly using standard host message mapping layout
+    return res.json(formatChatResponse(rollFeedback, threadContext, false));
+  } catch (error) {
+    console.error("Error executing slash command:", error);
+    return res.json(
+      formatChatResponse(
+        "*The DM drops the dice:* Something went wrong processing your mechanical check.",
+        null,
+        false,
+      ),
+    );
+  }
+});
+
+// ----------------------------------------------------
+// 🧙‍♂️ STANDARD CHAT FLOWS ENDPOINT
+// ----------------------------------------------------
 app.post("/chat-bot", async (req, res) => {
   let threadContext = null;
   let isCardResponse = false;
@@ -144,7 +257,6 @@ app.post("/chat-bot", async (req, res) => {
   try {
     const payload = req.body;
 
-    // 1. Loosened validation to correctly capture CARD_CLICKED payload environments
     if (payload?.commonEventObject?.hostApp !== "CHAT") {
       console.log(
         "--> Dropped: Request is missing valid Google Chat structure.",
@@ -155,17 +267,13 @@ app.post("/chat-bot", async (req, res) => {
     isCardResponse = payload.type === "CARD_CLICKED";
     let userMessage = "";
 
-    // ✅ FIXED STRUCTURES: Safely evaluate where the message container is located
     const incomingChatMessage = payload.chat?.messagePayload?.message;
     const incomingCardMessage =
       payload.commonEventObject?.messageToInteractiveCard;
 
     if (isCardResponse) {
-      // Pull form value by the 'name' attribute we assigned ("playerActionInput")
       const formInputs = payload.commonEventObject?.formInputs;
       userMessage = formInputs?.playerActionInput?.stringInputs?.value[0] || "";
-
-      // Extract thread out of the interactive card event context block
       threadContext = incomingCardMessage?.thread;
     } else {
       userMessage =
@@ -173,7 +281,6 @@ app.post("/chat-bot", async (req, res) => {
       threadContext = incomingChatMessage?.thread;
     }
 
-    // 3. Text Validation Guard Clause
     if (!userMessage || userMessage.trim() === "") {
       return res.json(
         formatChatResponse(
@@ -184,18 +291,15 @@ app.post("/chat-bot", async (req, res) => {
       );
     }
 
-    // Safely parse space path string out of whichever block holds it
     const threadId =
       payload.chat?.messagePayload?.space?.name ||
       incomingChatMessage?.space?.name ||
       incomingCardMessage?.space?.name ||
       "global-fallback";
 
-    // Flatten slash characters so Firestore doesn't process deep collections paths
     const docId = threadId.replace(/\//g, "-");
     const docRef = db.collection(CHAT_HISTORY_COLLECTION).doc(docId);
 
-    // 4. Fetch historic conversation log from Firestore
     const docSnap = await docRef.get();
     let history = [];
 
@@ -203,13 +307,11 @@ app.post("/chat-bot", async (req, res) => {
       history = docSnap.data().history || [];
     }
 
-    // 5. Append the user's latest turn to the history log
     history.push({
       role: "user",
       parts: [{ text: userMessage }],
     });
 
-    // 6. Request generation from Gemini
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: history,
@@ -221,18 +323,15 @@ app.post("/chat-bot", async (req, res) => {
     const botReply = response.text;
     console.log(`[Thread: ${docId}] Processed bot response`);
 
-    // 7. Append the model's response to the history log
     history.push({
       role: "model",
       parts: [{ text: botReply }],
     });
 
-    // 8. Keep memory optimized (Firestore limit is 1MB per doc)
     if (history.length > 40) {
       history = history.slice(-40);
     }
 
-    // 9. Commit the updated conversation history document back to Firestore
     await docRef.set(
       {
         history: history,
@@ -241,7 +340,6 @@ app.post("/chat-bot", async (req, res) => {
       { merge: true },
     );
 
-    // 10. Return response payload back safely
     return res.json(
       formatChatResponse(botReply, threadContext, isCardResponse),
     );
