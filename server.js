@@ -47,60 +47,32 @@ function convertMarkdownToChatHtml(mdText) {
 }
 
 /**
- * Formats a plain text string into a card structure containing an interactive response text input.
- * @param {string} textContent - The message text or DM narration.
+ * Formats a plain text string into a native Google Chat Markdown text response.
+ * @param {string} textContent - The raw text/markdown from the AI model or dice helper.
  * @param {object} [threadContext] - The thread object from the incoming event payload.
- * @param {boolean} [isCardClick=false] - True if this is responding to a CARD_CLICKED action.
  * @returns {object} The structured JSON payload for Google Chat.
  */
-function formatChatResponse(textContent, threadContext, isCardClick = false) {
-  const formattedHtml = textContent
-    ? convertMarkdownToChatHtml(textContent)
-    : "The DM remains silent...";
+function formatChatResponse(textContent, threadContext) {
+  // Fallback for empty strings
+  let rawText = textContent || "_The DM remains silent..._";
 
+  // Google Chat uses single asterisks * text * for bold.
+  // If Gemini outputs standard markdown (**text**), we reduce it down:
+  let chatMarkdown = rawText
+    .replace(/\*\*(.*?)\*\*/g, "*$1*") // Fix **bold** to *bold*
+    .replace(/__(.*?)__/g, "*$1*"); // Fix __bold__ to *bold*
+
+  // Build the native text layout payload
   const messageData = {
-    cardsV2: [
-      {
-        cardId: "dmResponseCard",
-        card: {
-          header: {
-            title: "🧙‍♂️ Dungeon Master",
-            imageUrl:
-              "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/casino/default/24px.svg",
-          },
-          sections: [
-            {
-              widgets: [
-                {
-                  textParagraph: {
-                    text: formattedHtml,
-                  },
-                },
-              ],
-            },
-          ],
-        },
-      },
-    ],
+    text: chatMarkdown,
   };
 
-  // ✅ MANIFEST-APPROVED INTERACTIVE CARD RESPONSE SCHEMA
-  if (isCardClick) {
-    return {
-      actionResponse: {
-        type: "UPDATE_MESSAGE",
-      },
-      message: {
-        cardsV2: messageData.cardsV2,
-        ...(threadContext ? { thread: threadContext } : {}),
-      },
-    };
-  }
-
+  // Keep message inside the ongoing thread if context is passed
   if (threadContext) {
     messageData.thread = threadContext;
   }
 
+  // Handle interactive response structures uniformly
   return {
     hostAppDataAction: {
       chatDataAction: {
@@ -214,14 +186,13 @@ app.post("/command", async (req, res) => {
     }
 
     // Return the response back cleanly using standard host message mapping layout
-    return res.json(formatChatResponse(rollFeedback, threadContext, false));
+    return res.json(formatChatResponse(rollFeedback, threadContext));
   } catch (error) {
     console.error("Error executing slash command:", error);
     return res.json(
       formatChatResponse(
         "*The DM drops the dice:* Something went wrong processing your mechanical check.",
         null,
-        false,
       ),
     );
   }
@@ -244,7 +215,6 @@ app.post("/chat-bot", async (req, res) => {
       return res.status(200).send();
     }
 
-    isCardResponse = payload.type === "CARD_CLICKED";
     let userMessage = "";
 
     const incomingChatMessage = payload.chat?.messagePayload?.message;
@@ -266,7 +236,6 @@ app.post("/chat-bot", async (req, res) => {
         formatChatResponse(
           "*The DM leans forward:* I heard you call my name, but I didn't catch your action. What would you like to do?",
           threadContext,
-          isCardResponse,
         ),
       );
     }
@@ -320,16 +289,13 @@ app.post("/chat-bot", async (req, res) => {
       { merge: true },
     );
 
-    return res.json(
-      formatChatResponse(botReply, threadContext, isCardResponse),
-    );
+    return res.json(formatChatResponse(botReply, threadContext));
   } catch (error) {
     console.error("Error processing chat event:", error);
     return res.json(
       formatChatResponse(
         "*The DM stalls:* An error occurred while calculating your fate. Please try again.",
         threadContext,
-        isCardResponse,
       ),
     );
   }
