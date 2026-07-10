@@ -78,33 +78,6 @@ function formatChatResponse(textContent, threadContext, isCardClick = false) {
                 },
               ],
             },
-            {
-              widgets: [
-                {
-                  textInput: {
-                    name: "playerActionInput",
-                    label: "What do you do?",
-                    type: "MULTIPLE_LINE",
-                    placeholderText:
-                      "Type your action here (e.g., I draw my sword and attack)...",
-                  },
-                },
-                {
-                  buttonList: {
-                    buttons: [
-                      {
-                        text: "Send Action to DM",
-                        onClick: {
-                          action: {
-                            function: "SUBMIT_ACTION",
-                          },
-                        },
-                      },
-                    ],
-                  },
-                },
-              ],
-            },
           ],
         },
       },
@@ -145,7 +118,7 @@ function formatChatResponse(textContent, threadContext, isCardClick = false) {
  * @returns {object} An object containing the individual rolls, the total, and a formatted string.
  */
 function rollDice(diceText) {
-  const match = diceText.trim().match(/^(\d+)d(\d+)$/i);
+  const match = diceText.trim().match(/(?:^|\s|[^\d])(\d+)d(\d+)\b/i);
   if (!match) return null;
 
   const count = parseInt(match[1], 10);
@@ -230,7 +203,7 @@ app.post("/command", async (req, res) => {
         { merge: true },
       );
     } else {
-      rollFeedback = `*The DM holds out an empty hand:* Invalid format. Please use \`/roll {n}d{s}\` (e.g., \`/roll 1d20\` or \`/roll 2d6\`).`;
+      rollFeedback = `*The DM holds out an empty hand:* Invalid format. Please use \`{n}d{s}\` (e.g., \`1d20\` or \`2d6\`).`;
     }
 
     // Return the response back cleanly using standard host message mapping layout
