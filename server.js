@@ -157,12 +157,12 @@ app.post("/command", async (req, res) => {
       return res.status(200).send();
     }
 
-    const incomingChatMessage = payload.chat?.messagePayload?.message;
+    const incomingChatMessage = payload.chat?.appCommandPayload?.message;
     const threadContext = incomingChatMessage?.thread;
 
     // Capture unique space paths safely to write to correct log file
     const threadId =
-      payload.chat?.messagePayload?.space?.name ||
+      payload.chat?.appCommandPayload?.space?.name ||
       incomingChatMessage?.space?.name ||
       "global-fallback";
 
