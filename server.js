@@ -149,6 +149,9 @@ function rollDice(diceText) {
 app.post("/command", async (req, res) => {
   try {
     const payload = req.body;
+    console.log(
+      `[RAW COMMAND PAYLOAD] ${JSON.stringify(payload || {}).replace(/[\r\n]+/g, " ")}`,
+    );
 
     if (payload?.commonEventObject?.hostApp !== "CHAT") {
       return res.status(200).send();
@@ -166,7 +169,11 @@ app.post("/command", async (req, res) => {
     const docId = threadId.replace(/\//g, "-");
     const docRef = db.collection(CHAT_HISTORY_COLLECTION).doc(docId);
 
-    const commandArgs = (incomingChatMessage?.argumentText || "").trim();
+    const commandArgs = (
+      incomingChatMessage?.argumentText ||
+      incomingChatMessage?.text ||
+      ""
+    ).trim();
     const diceResult = rollDice(commandArgs);
 
     let rollFeedback = "";
