@@ -119,9 +119,10 @@ function formatChatResponse(textContent, threadContext, isCardClick = false) {
   if (isCardClick) {
     return {
       actionResponse: {
-        type: "NEW_MESSAGE",
+        type: "UPDATE_MESSAGE",
       },
-      ...messageData,
+      // Cards must be nested inside the structural cardsV2 wrapper explicitly
+      cardsV2: messageData.cardsV2,
     };
   }
 
