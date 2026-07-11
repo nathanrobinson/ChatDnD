@@ -10,69 +10,38 @@ app.use(express.urlencoded({ extended: true }));
 // Initialize the official Google Gen AI client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Initialize Firestore. It automatically grabs your Google Cloud project ID.
+// Initialize Firestore
 const db = new Firestore();
 const CHAT_HISTORY_COLLECTION = "dnd_sessions";
 
-// Your unchanging, heavy D&D ruleset framework
+// Heavy D&D ruleset framework
 const SYSTEM_INSTRUCTION = `
 You are an expert, immersive D&D 5e Dungeon Master. 
 Maintain a rich narrative environment but format responses with bold text, 
 bullet points, or brief paragraphs so they are easy to scan in a chat window.
 Adhere strictly to 5e rules, track relative distances, and ask for specific dice rolls when necessary.
 If players don't have saved player cards, generate one for them.
+Always display HP for all parties involved in a battle after every move.
 `;
 
 /**
- * Converts standard Markdown syntax into Google Chat Card compatible HTML tags.
- * @param {string} mdText - The raw markdown text from the AI model.
- * @returns {string} The formatted HTML string.
- */
-function convertMarkdownToChatHtml(mdText) {
-  if (!mdText) return "";
-
-  return (
-    mdText
-      // 1. Convert Bold (**text** or __text__) to <b>text</b>
-      .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
-      .replace(/__(.*?)__/g, "<b>$1</b>")
-
-      // 2. Convert Italics (*text* or _text_) to <i>text</i>
-      .replace(/\*(.*?)\*/g, "<i>$1</i>")
-      .replace(/_(.*?)_/g, "<i>$1</i>")
-
-      // 3. Convert Linebreaks into explicit HTML breaks
-      .replace(/\n/g, "<br>")
-  );
-}
-
-/**
  * Formats a plain text string into a native Google Chat Markdown text response.
- * @param {string} textContent - The raw text/markdown from the AI model or dice helper.
- * @param {object} [threadContext] - The thread object from the incoming event payload.
- * @returns {object} The structured JSON payload for Google Chat.
  */
 function formatChatResponse(textContent, threadContext) {
-  // Fallback for empty strings
   let rawText = textContent || "_The DM remains silent..._";
 
-  // Google Chat uses single asterisks * text * for bold.
-  // If Gemini outputs standard markdown (**text**), we reduce it down:
   let chatMarkdown = rawText
-    .replace(/\*\*(.*?)\*\*/g, "*$1*") // Fix **bold** to *bold*
-    .replace(/__(.*?)__/g, "*$1*"); // Fix __bold__ to *bold*
+    .replace(/\*\*(.*?)\*\*/g, "*$1*")
+    .replace(/__(.*?)__/g, "*$1*");
 
-  // Build the native text layout payload
   const messageData = {
     text: chatMarkdown,
   };
 
-  // Keep message inside the ongoing thread if context is passed
   if (threadContext) {
     messageData.thread = threadContext;
   }
 
-  // Handle interactive response structures uniformly
   return {
     hostAppDataAction: {
       chatDataAction: {
@@ -86,8 +55,6 @@ function formatChatResponse(textContent, threadContext) {
 
 /**
  * Parses a dice string (e.g., "2d6") and evaluates the random rolls.
- * @param {string} diceText - The dice notation string.
- * @returns {object} An object containing the individual rolls, the total, and a formatted string.
  */
 function rollDice(diceText) {
   const match = diceText.trim().match(/(?:^|\s|[^\d])(\d+)d(\d+)\b/i);
@@ -116,7 +83,7 @@ function rollDice(diceText) {
 }
 
 // ----------------------------------------------------
-// 🎲 NEW COMMAND ENDPOINT
+// 🎲 SLASH COMMAND HANDLER ENDPOINT
 // ----------------------------------------------------
 app.post("/command", async (req, res) => {
   try {
@@ -132,12 +99,17 @@ app.post("/command", async (req, res) => {
     const incomingChatMessage = payload.chat?.appCommandPayload?.message;
     const threadContext = incomingChatMessage?.thread;
 
-    // Capture unique space paths safely to write to correct log file
+    const userRefId =
+      incomingChatMessage?.sender?.name ||
+      payload.chat?.user?.name ||
+      "unknown-user";
+    const userDisplayName =
+      incomingChatMessage?.sender?.displayName || "Adventurer";
+
     const threadId =
       payload.chat?.appCommandPayload?.space?.name ||
       incomingChatMessage?.space?.name ||
       "global-fallback";
-
     const docId = threadId.replace(/\//g, "-");
     const docRef = db.collection(CHAT_HISTORY_COLLECTION).doc(docId);
 
@@ -146,47 +118,66 @@ app.post("/command", async (req, res) => {
       incomingChatMessage?.text ||
       ""
     ).trim();
-    const diceResult = rollDice(commandArgs);
+    const commandId =
+      payload.chat?.appCommandPayload?.appCommandMetadata?.appCommandId;
 
-    let rollFeedback = "";
+    // 📜 COMMAND ID 2: REGISTER PLAYER CARD
+    if (commandId === 2) {
+      let feedback = "";
+      const cleanArgs = commandArgs.replace(/^(?:\/)?register\s*/i, "").trim();
 
-    if (diceResult?.error) {
-      rollFeedback = `*The DM sighs:* ${diceResult.error}`;
-    } else if (diceResult) {
-      rollFeedback = `🎲 ${diceResult.text}`;
-
-      // Fetch history log to push context metadata back in
-      const docSnap = await docRef.get();
-      let history = [];
-      if (docSnap.exists) {
-        history = docSnap.data().history || [];
+      if (!cleanArgs) {
+        feedback = `*The DM looks up:* The character sheet appears empty. Format:\n\`/register Dustin\`\n\`* Race: Human...\``;
+        return res.json(formatChatResponse(feedback, threadContext));
       }
 
-      // Inject the roll context output explicitly into the history log array
-      history.push({
-        role: "user",
-        parts: [
-          { text: `[SYSTEM: Player rolled dice. Result: ${diceResult.text}]` },
-        ],
-      });
+      const textLines = cleanArgs
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const playerName = textLines[0].replace(/[\*\_]/g, "");
 
-      if (history.length > 40) {
-        history = history.slice(-40);
+      await docRef.set(
+        {
+          playerCards: {
+            [userRefId]: {
+              playerName: playerName || userDisplayName,
+              playerSheet: cleanArgs,
+            },
+          },
+        },
+        { merge: true },
+      );
+
+      feedback = `📜 *The DM records your character sheet:* **${userDisplayName}** has successfully registered **${playerName || "their character"}**! I will consult this sheet when you make your actions.`;
+      return res.json(formatChatResponse(feedback, threadContext));
+    }
+
+    // ⚔️ COMMAND ID 3: START CAMPAIGN
+    else if (commandId === 3) {
+      let feedback = "";
+      // Clean up the input string if the command keyword leaked in
+      const campaign = commandArgs.replace(/^(?:\/)?campaign\s*/i, "").trim();
+
+      if (!campaign) {
+        feedback =
+          "*The DM looks up:* Please provide campaign details after the command.";
+        return res.json(formatChatResponse(feedback, threadContext));
       }
 
       await docRef.set(
         {
-          history: history,
-          lastUpdated: Firestore.FieldValue.serverTimestamp(),
+          campaign: campaign,
+          currentTurn: 0,
         },
         { merge: true },
       );
-    } else {
-      rollFeedback = `*The DM holds out an empty hand:* Invalid format. Please use \`{n}d{s}\` (e.g., \`1d20\` or \`2d6\`).`;
+
+      feedback = `📜 *The DM begins a new campaign:* **${userDisplayName}** has successfully initiated a new campaign landscape: "${campaign}"`;
+      return res.json(formatChatResponse(feedback, threadContext));
     }
 
-    // Return the response back cleanly using standard host message mapping layout
-    return res.json(formatChatResponse(rollFeedback, threadContext));
+    return res.json(formatChatResponse("Unknown command.", threadContext));
   } catch (error) {
     console.error("Error executing slash command:", error);
     return res.json(
@@ -199,37 +190,32 @@ app.post("/command", async (req, res) => {
 });
 
 // ----------------------------------------------------
-// 🧙‍♂️ STANDARD CHAT FLOWS ENDPOINT
+// 🧙‍♂️ MAIN GAME ACTION TEXT ENDPOINT
 // ----------------------------------------------------
 app.post("/chat-bot", async (req, res) => {
   let threadContext = null;
-  let isCardResponse = false;
 
   try {
     const payload = req.body;
 
     if (payload?.commonEventObject?.hostApp !== "CHAT") {
-      console.log(
-        "--> Dropped: Request is missing valid Google Chat structure.",
-      );
       return res.status(200).send();
     }
-
-    let userMessage = "";
 
     const incomingChatMessage = payload.chat?.messagePayload?.message;
     const incomingCardMessage =
       payload.commonEventObject?.messageToInteractiveCard;
 
-    if (isCardResponse) {
-      const formInputs = payload.commonEventObject?.formInputs;
-      userMessage = formInputs?.playerActionInput?.stringInputs?.value[0] || "";
-      threadContext = incomingCardMessage?.thread;
-    } else {
-      userMessage =
-        incomingChatMessage?.argumentText || incomingChatMessage?.text || "";
-      threadContext = incomingChatMessage?.thread;
-    }
+    const userMessage =
+      incomingChatMessage?.argumentText || incomingChatMessage?.text || "";
+    threadContext = incomingChatMessage?.thread;
+
+    const userRefId =
+      incomingChatMessage?.sender?.name ||
+      payload.chat?.user?.name ||
+      "unknown-user";
+    const userDisplayName =
+      incomingChatMessage?.sender?.displayName || "Adventurer";
 
     if (!userMessage || userMessage.trim() === "") {
       return res.json(
@@ -245,27 +231,52 @@ app.post("/chat-bot", async (req, res) => {
       incomingChatMessage?.space?.name ||
       incomingCardMessage?.space?.name ||
       "global-fallback";
-
     const docId = threadId.replace(/\//g, "-");
     const docRef = db.collection(CHAT_HISTORY_COLLECTION).doc(docId);
 
     const docSnap = await docRef.get();
     let history = [];
+    let playerCards = {};
+    let campaign = "";
+    let currentTurn = 0;
 
     if (docSnap.exists) {
-      history = docSnap.data().history || [];
+      const docData = docSnap.data();
+      history = docData.history || [];
+      playerCards = docData.playerCards || {};
+      campaign = docData.campaign || "";
+      currentTurn = docData.currentTurn ?? 0;
     }
 
     history.push({
       role: "user",
-      parts: [{ text: userMessage }],
+      parts: [{ text: `${userDisplayName}: ${userMessage}` }],
     });
+
+    let systemInstruction = SYSTEM_INSTRUCTION;
+
+    // ✅ FIX: Inject the ENTIRE party's character sheets so the DM remembers everyone in the room
+    const registeredPlayers = Object.keys(playerCards);
+    if (registeredPlayers.length > 0) {
+      systemInstruction += "\n\n=== ACTIVE ADVENTURING PARTY ===";
+      for (const playerKey of registeredPlayers) {
+        const card = playerCards[playerKey];
+        systemInstruction += `\nCharacter Profile [Registered to user ID: ${playerKey}]:\n${card.playerSheet}\n---`;
+      }
+
+      // Explicitly tell the model who just made the current move
+      systemInstruction += `\n\n[CURRENT ACTION CONTEXT]: The user currently acting is "${userDisplayName}" (ID: ${userRefId}). Match their action against their specific profile listed above.`;
+    }
+
+    if (campaign) {
+      systemInstruction += `\n\n=== CAMPAIGN FRAMEWORK ===\nContext: "${campaign}"\nCurrent Turn: ${currentTurn}\nTarget Timeline: Complete this segment by turn 40.`;
+    }
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: history,
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: systemInstruction,
       },
     });
 
@@ -277,14 +288,17 @@ app.post("/chat-bot", async (req, res) => {
       parts: [{ text: botReply }],
     });
 
-    if (history.length > 40) {
-      history = history.slice(-40);
+    if (history.length > 30) {
+      history = history.slice(-30);
     }
+
+    const nextTurn = currentTurn + 1;
 
     await docRef.set(
       {
         history: history,
         lastUpdated: Firestore.FieldValue.serverTimestamp(),
+        currentTurn: nextTurn,
       },
       { merge: true },
     );
