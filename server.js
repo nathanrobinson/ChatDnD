@@ -153,7 +153,7 @@ async function generateDMResponse({
 
   try {
     const cache = await ai.caches.create({
-      model: "gemini-2.5-flash-light",
+      model: "gemini-2.5-flash-lite",
       displayName: uniqueCacheName,
       ttl: "1800s",
       contents: [{ role: "user", parts: [{ text: staticRuleset }] }],
@@ -168,7 +168,7 @@ async function generateDMResponse({
   }
 
   const generationConfig = {
-    model: "gemini-2.5-flash-light",
+    model: "gemini-2.5-flash-lite",
     contents: history,
   };
 
