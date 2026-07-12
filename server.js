@@ -385,19 +385,26 @@ app.post("/chat-bot", async (req, res) => {
 
     const currentUserTurn = {
       role: "user",
-      parts: [{ text: `${userDisplayName}: ${userMessage}\n\n[TURN CONTEXT]: Game Turn Count: ${currentTurn} | Active user ID: "${userRefId}". Evaluate choices matching this profile.` }],
+      parts: [{ text: `${userDisplayName}: ${userMessage}` }],
+    };
+
+    history.push(currentUsrerTurn);
+
+    cosnt currentTurnContext = {
+      role: "user",
+      parts: [{ text: `[TURN CONTEXT]: Game Turn Count: ${currentTurn} | Active user ID: "${userRefId}". Evaluate choices matching this profile.` }],
     };
 
     // 1. Get response based on active array state
     const botReply = await generateDMResponse({
       sessionId,
-      history: [...history, currentUserTurn],
+      history: [...history, currentTurnContext],
       playerCards,
       campaign,
       campaignSummary,
     });
 
-    history.push(currentUserTurn, {
+    history.push({
       role: "model",
       parts: [{ text: botReply }],
     });
