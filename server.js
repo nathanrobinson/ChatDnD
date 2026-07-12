@@ -11,6 +11,7 @@ app.use(express.urlencoded({ extended: true }));
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const db = new Firestore();
 const CHAT_HISTORY_COLLECTION = "dnd_sessions";
+const GEMINI_MODEL_KEY = "gemini-3.1-flash-lite";
 
 // Optimized system instructions to enforce tight, low-token outputs
 const SYSTEM_INSTRUCTION = `
@@ -153,7 +154,7 @@ async function generateDMResponse({
 
   try {
     const cache = await ai.caches.create({
-      model: "gemini-2.5-flash-lite",
+      model: GEMINI_MODEL_KEY,
       displayName: uniqueCacheName,
       ttl: "1800s",
       contents: [{ role: "user", parts: [{ text: staticRuleset }] }],
@@ -168,7 +169,7 @@ async function generateDMResponse({
   }
 
   const generationConfig = {
-    model: "gemini-2.5-flash-lite",
+    model: GEMINI_MODEL_KEY,
     contents: history,
   };
 
