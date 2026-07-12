@@ -441,6 +441,24 @@ app.post("/command", async (req, res) => {
       return res.json(formatChatResponse(spellbookOutput, threadContext));
     }
 
+    // 📄 COMMAND ID 8: SHOW CHARACTER SHEET FOR CURRENT PLAYER
+    else if (commandId === 8) {
+      const { playerCards } = await loadSessionData(docRef);
+      const activeChar = playerCards[userRefId];
+
+      if (!activeChar) {
+        return res.json(
+          formatChatResponse(
+            `*The DM unrolls an empty scroll:* You do not have a character card registered in this session. Use \`/register\` to build one.`,
+            threadContext,
+          ),
+        );
+      }
+
+      const sheetOutput = `📄 **CHARACTER PROFILE: ${activeChar.playerName.toUpperCase()}**\n\n${activeChar.playerSheet}`;
+      return res.json(formatChatResponse(sheetOutput, threadContext));
+    }
+
     return res.json(formatChatResponse("Unknown command.", threadContext));
   } catch (error) {
     console.error("Error executing slash command:", error);
