@@ -14,8 +14,8 @@ const CHAT_HISTORY_COLLECTION = "dnd_sessions";
 const GEMINI_MODEL_KEY = "gemini-3.1-flash-lite";
 
 // Compaction thresholds and safety limits
-const MAX_HISTORY_LENGTH = 40;
-const SHRINK_HISTORY_LENGTH = 5;
+const MAX_HISTORY_LENGTH = 50;
+const SHRINK_HISTORY_LENGTH = 10;
 const GLOBAL_SUMMARY_TOKEN_LIMIT = 100000;
 
 // Optimized system instructions to enforce tight, low-token outputs
