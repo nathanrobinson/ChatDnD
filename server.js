@@ -56,7 +56,7 @@ function extractChatMetadata(payload) {
       "global-fallback";
 
   const sessionId = rawSpaceName.replace(/\//g, "-");
-  
+
   const commandId =
     payload.chat?.appCommandPayload?.appCommandMetadata?.appCommandId || null;
 
@@ -124,7 +124,6 @@ async function generateDMResponse({
   playerCards,
   campaign,
 }) {
-  // 1. Compile your heavy text framework ruleset — REMOVED currentTurn to keep this 100% static!
   let staticRuleset = SYSTEM_INSTRUCTION;
 
   const registeredPlayers = Object.keys(playerCards || {});
@@ -133,11 +132,11 @@ async function generateDMResponse({
     for (const playerKey of registeredPlayers) {
       const player = playerCards[playerKey];
       staticRuleset += `\nCharacter Profile [User ID: ${playerKey}]:\n${player.playerSheet}`;
-      
+
       if (player.inventory && player.inventory.length > 0) {
         staticRuleset += `\nCarried Inventory Items:\n* ${player.inventory.join("\n* ")}`;
       }
-      
+
       if (player.learnedSpells && player.learnedSpells.length > 0) {
         staticRuleset += `\nAdditional Known Spells:\n* ${player.learnedSpells.join("\n* ")}`;
       }
@@ -149,7 +148,6 @@ async function generateDMResponse({
     staticRuleset += `\n\n=== CAMPAIGN FRAMEWORK ===\nContext: "${campaign}"\nTarget Timeline: Complete segment by turn 40.`;
   }
 
-  // 2. Attempt Cache Upsert — This will now hit perfectly on every single turn!
   const uniqueCacheName = `dnd-cache-${sessionId}`;
   let cacheReferenceName = null;
 
@@ -158,19 +156,20 @@ async function generateDMResponse({
       model: "gemini-2.5-flash-light",
       displayName: uniqueCacheName,
       ttl: "1800s",
-      contents: [{ role: "user", parts: [{ text: staticRuleset }] }]
+      contents: [{ role: "user", parts: [{ text: staticRuleset }] }],
     });
-    
+
     cacheReferenceName = cache.name;
-    
   } catch (cacheError) {
-    console.warn("Context caching deferred, switching to inline fallback payload:", cacheError.message);
+    console.warn(
+      "Context caching deferred, switching to inline fallback payload:",
+      cacheError.message,
+    );
   }
 
-  // 3. Build execution configuration uniformly
-  const generationConfig = { 
+  const generationConfig = {
     model: "gemini-2.5-flash-light",
-    contents: history
+    contents: history,
   };
 
   if (cacheReferenceName) {
@@ -206,41 +205,65 @@ app.post("/command", async (req, res) => {
     if (commandId === 2) {
       const cleanArgs = userMessage.replace(/^(?:\/)?register\s*/i, "").trim();
       if (!cleanArgs) {
-        return res.json(formatChatResponse(`*The DM looks up:* The character sheet appears empty.`, threadContext));
+        return res.json(
+          formatChatResponse(
+            `*The DM looks up:* The character sheet appears empty.`,
+            threadContext,
+          ),
+        );
       }
 
-      const textLines = cleanArgs.split("\n").map((line) => line.trim()).filter(Boolean);
+      const textLines = cleanArgs
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
       const playerName = textLines[0].replace(/[\*\_]/g, "");
 
-      await docRef.set({
-        playerCards: {
-          [userRefId]: {
-            playerName: playerName || userDisplayName,
-            playerSheet: cleanArgs,
-            inventory: [],
-            learnedSpells: []
+      await docRef.set(
+        {
+          playerCards: {
+            [userRefId]: {
+              playerName: playerName || userDisplayName,
+              playerSheet: cleanArgs,
+              inventory: [],
+              learnedSpells: [],
+            },
           },
         },
-      }, { merge: true });
+        { merge: true },
+      );
 
-      return res.json(formatChatResponse(`📜 *The DM records your character sheet:* **${userDisplayName}** has successfully registered **${playerName || "their character"}**!`, threadContext));
+      return res.json(
+        formatChatResponse(
+          `📜 *The DM records your character sheet:* **${userDisplayName}** has successfully registered **${playerName || "their character"}**!`,
+          threadContext,
+        ),
+      );
     }
 
     // ⚔️ COMMAND ID 3: START CAMPAIGN
     else if (commandId === 3) {
       const campaign = userMessage.replace(/^(?:\/)?campaign\s*/i, "").trim();
       if (!campaign) {
-        return res.json(formatChatResponse("*The DM looks up:* Please provide campaign details after the command.", threadContext));
+        return res.json(
+          formatChatResponse(
+            "*The DM looks up:* Please provide campaign details after the command.",
+            threadContext,
+          ),
+        );
       }
 
       const { playerCards } = await loadSessionData(docRef);
 
       const initialSystemMessage = {
         role: "user",
-        parts: [{ text: `[SYSTEM COMMAND]: The user "${userDisplayName}" has just launched a new campaign session framework. Generate an atmospheric, immersive opening prologue segment.\n\n[TURN CONTEXT]: Current Game Turn: 0` }],
+        parts: [
+          {
+            text: `[SYSTEM COMMAND]: The user "${userDisplayName}" has just launched a new campaign session framework. Generate an atmospheric, immersive opening prologue segment.\n\n[TURN CONTEXT]: Current Game Turn: 0`,
+          },
+        ],
       };
 
-      // Notice we dropped currentTurn parameter entirely from the function call
       const initialDMPrologue = await generateDMResponse({
         sessionId,
         history: [initialSystemMessage],
@@ -248,14 +271,17 @@ app.post("/command", async (req, res) => {
         campaign,
       });
 
-      await docRef.set({
-        campaign,
-        currentTurn: 1,
-        history: [
-          initialSystemMessage,
-          { role: "model", parts: [{ text: initialDMPrologue }] },
-        ],
-      }, { merge: true });
+      await docRef.set(
+        {
+          campaign,
+          currentTurn: 1,
+          history: [
+            initialSystemMessage,
+            { role: "model", parts: [{ text: initialDMPrologue }] },
+          ],
+        },
+        { merge: true },
+      );
 
       return res.json(formatChatResponse(initialDMPrologue, threadContext));
     }
@@ -264,17 +290,29 @@ app.post("/command", async (req, res) => {
     else if (commandId === 4) {
       const itemArg = userMessage.replace(/^(?:\/)?inventory\s*/i, "").trim();
       if (!itemArg) {
-        return res.json(formatChatResponse(`*The DM checks your pack:* Please specify an item to manage.`, threadContext));
+        return res.json(
+          formatChatResponse(
+            `*The DM checks your pack:* Please specify an item to manage.`,
+            threadContext,
+          ),
+        );
       }
 
       const { playerCards } = await loadSessionData(docRef);
       if (!playerCards[userRefId]) {
-        return res.json(formatChatResponse(`*The DM frowns:* Please register your character sheet using \`/register\` first.`, threadContext));
+        return res.json(
+          formatChatResponse(
+            `*The DM frowns:* Please register your character sheet using \`/register\` first.`,
+            threadContext,
+          ),
+        );
       }
 
       let currentInventory = playerCards[userRefId].inventory || [];
       const lowerItem = itemArg.toLowerCase();
-      const itemIndex = currentInventory.findIndex(i => i.toLowerCase() === lowerItem);
+      const itemIndex = currentInventory.findIndex(
+        (i) => i.toLowerCase() === lowerItem,
+      );
 
       let actionMessage = "";
       if (itemIndex > -1) {
@@ -285,11 +323,14 @@ app.post("/command", async (req, res) => {
         actionMessage = `🎒 **${userDisplayName}** added to inventory: *${itemArg}*`;
       }
 
-      await docRef.set({
-        playerCards: {
-          [userRefId]: { inventory: currentInventory }
-        }
-      }, { merge: true });
+      await docRef.set(
+        {
+          playerCards: {
+            [userRefId]: { inventory: currentInventory },
+          },
+        },
+        { merge: true },
+      );
 
       return res.json(formatChatResponse(actionMessage, threadContext));
     }
@@ -298,34 +339,117 @@ app.post("/command", async (req, res) => {
     else if (commandId === 5) {
       const spellArg = userMessage.replace(/^(?:\/)?learn\s*/i, "").trim();
       if (!spellArg) {
-        return res.json(formatChatResponse(`*The DM consults the archives:* Please specify the name of the spell you learned.`, threadContext));
+        return res.json(
+          formatChatResponse(
+            `*The DM consults the archives:* Please specify the name of the spell you learned.`,
+            threadContext,
+          ),
+        );
       }
 
       const { playerCards } = await loadSessionData(docRef);
       if (!playerCards[userRefId]) {
-        return res.json(formatChatResponse(`*The DM frowns:* Please register your character sheet using \`/register\` first.`, threadContext));
+        return res.json(
+          formatChatResponse(
+            `*The DM frowns:* Please register your character sheet using \`/register\` first.`,
+            threadContext,
+          ),
+        );
       }
 
       let currentSpells = playerCards[userRefId].learnedSpells || [];
-      if (currentSpells.some(s => s.toLowerCase() === spellArg.toLowerCase())) {
-        return res.json(formatChatResponse(`🔮 You already know the spell *${spellArg}*.`, threadContext));
+      if (
+        currentSpells.some((s) => s.toLowerCase() === spellArg.toLowerCase())
+      ) {
+        return res.json(
+          formatChatResponse(
+            `🔮 You already know the spell *${spellArg}*.`,
+            threadContext,
+          ),
+        );
       }
 
       currentSpells.push(spellArg);
 
-      await docRef.set({
-        playerCards: {
-          [userRefId]: { learnedSpells: currentSpells }
-        }
-      }, { merge: true });
+      await docRef.set(
+        {
+          playerCards: {
+            [userRefId]: { learnedSpells: currentSpells },
+          },
+        },
+        { merge: true },
+      );
 
-      return res.json(formatChatResponse(`🔮 **${userDisplayName}** breaks the seal on a mystical nexus and seals a new incantation into their mind: *${spellArg}*!`, threadContext));
+      return res.json(
+        formatChatResponse(
+          `🔮 **${userDisplayName}** breaks the seal on a mystical nexus and seals a new incantation into their mind: *${spellArg}*!`,
+          threadContext,
+        ),
+      );
+    }
+
+    // 📜 COMMAND ID 6: LIST ALL PLAYER INVENTORIES
+    else if (commandId === 6) {
+      const { playerCards } = await loadSessionData(docRef);
+      const players = Object.keys(playerCards);
+
+      if (players.length === 0) {
+        return res.json(
+          formatChatResponse(
+            `*The DM surveys the campsite:* No characters are currently registered in this session.`,
+            threadContext,
+          ),
+        );
+      }
+
+      let partyManifest = `📋 **PARTY INVENTORY MANIFEST**\n`;
+      for (const key of players) {
+        const char = playerCards[key];
+        const invList =
+          char.inventory && char.inventory.length > 0
+            ? char.inventory.map((item) => `  • ${item}`).join("\n")
+            : "  • _Empty_";
+        partyManifest += `\n**${char.playerName}** (User: ${key}):\n${invList}\n`;
+      }
+
+      return res.json(formatChatResponse(partyManifest, threadContext));
+    }
+
+    // 📖 COMMAND ID 7: SHOW SPELLBOOK FOR CURRENT PLAYER
+    else if (commandId === 7) {
+      const { playerCards } = await loadSessionData(docRef);
+      const activeChar = playerCards[userRefId];
+
+      if (!activeChar) {
+        return res.json(
+          formatChatResponse(
+            `*The DM checks the rosters:* You have not registered a character card in this session yet. Use \`/register\`.`,
+            threadContext,
+          ),
+        );
+      }
+
+      const spells = activeChar.learnedSpells || [];
+      let spellbookOutput = `📖 **SPELLBOOK: ${activeChar.playerName.toUpperCase()}**\n`;
+
+      if (spells.length === 0) {
+        spellbookOutput += `\n_Your memory holds no custom incantations. Learn spells using \`/learn {spell name}\`._`;
+      } else {
+        spellbookOutput += spells.map((spell) => `  ✨ ${spell}`).join("\n");
+      }
+
+      return res.json(formatChatResponse(spellbookOutput, threadContext));
     }
 
     return res.json(formatChatResponse("Unknown command.", threadContext));
   } catch (error) {
     console.error("Error executing slash command:", error);
-    return res.json(formatChatResponse("*The DM drops the dice:* Something went wrong processing your mechanical check.", null));
+    return res.json(
+      formatChatResponse(
+        "*The DM drops the dice:* Something went wrong processing your mechanical check.",
+        null,
+      ),
+    );
   }
 });
 
@@ -338,21 +462,33 @@ app.post("/chat-bot", async (req, res) => {
     if (payload?.commonEventObject?.hostApp !== "CHAT")
       return res.status(200).send();
 
-    const { userMessage, threadContext, userRefId, userDisplayName, sessionId } =
-      extractChatMetadata(payload);
+    const {
+      userMessage,
+      threadContext,
+      userRefId,
+      userDisplayName,
+      sessionId,
+    } = extractChatMetadata(payload);
     if (!userMessage) {
-      return res.json(formatChatResponse("*The DM leans forward:* I heard you call my name, but I didn't catch your action.", threadContext));
+      return res.json(
+        formatChatResponse(
+          "*The DM leans forward:* I heard you call my name, but I didn't catch your action.",
+          threadContext,
+        ),
+      );
     }
 
     const docRef = getDocRef(sessionId);
-    let { history, playerCards, campaign, currentTurn } = await loadSessionData(docRef);
+    let { history, playerCards, campaign, currentTurn } =
+      await loadSessionData(docRef);
 
-    // Injected currentTurn here so it tracks natively within the volatile message block
     const currentUserTurn = {
       role: "user",
-      parts: [{ 
-        text: `${userDisplayName}: ${userMessage}\n\n[TURN CONTEXT]: Game Turn Count: ${currentTurn} | Active user ID: "${userRefId}". Evaluate choices matching this profile.` 
-      }],
+      parts: [
+        {
+          text: `${userDisplayName}: ${userMessage}\n\n[TURN CONTEXT]: Game Turn Count: ${currentTurn} | Active user ID: "${userRefId}". Evaluate choices matching this profile.`,
+        },
+      ],
     };
 
     const botReply = await generateDMResponse({
@@ -366,21 +502,31 @@ app.post("/chat-bot", async (req, res) => {
       role: "model",
       parts: [{ text: botReply }],
     });
-    
+
     if (history.length > 20) history = history.slice(-20);
 
-    await docRef.set({
-      history,
-      currentTurn: currentTurn + 1,
-      lastUpdated: Firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    await docRef.set(
+      {
+        history,
+        currentTurn: currentTurn + 1,
+        lastUpdated: Firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
 
     return res.json(formatChatResponse(botReply, threadContext));
   } catch (error) {
     console.error("Error processing chat event:", error);
-    return res.json(formatChatResponse("*The DM stalls:* An error occurred while calculating your fate.", null));
+    return res.json(
+      formatChatResponse(
+        "*The DM stalls:* An error occurred while calculating your fate.",
+        null,
+      ),
+    );
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`D&D Bot backend listening on port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`D&D Bot backend listening on port ${PORT}`),
+);
