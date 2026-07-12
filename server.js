@@ -15,7 +15,7 @@ const CHAT_HISTORY_COLLECTION = "dnd_sessions";
 // Optimized system instructions to enforce tight, low-token outputs
 const SYSTEM_INSTRUCTION = `
 You are an expert, immersive D&D 5e Dungeon Master. 
-Unless explicity asked for more detail by the user, or the user is investigating, keep narrative descriptions concise and atmospheric—limit narrative text to a maximum of 4 sentences per turn.
+Unless explicity asked for more detail by the user, or the user is investigating, keep narrative descriptions concise and atmospheric—limit narrative text to a maximum of 5 sentences per turn.
 Adhere strictly to 5e rules and ask for specific dice rolls when necessary.
 Only display character/enemy HP when a change occurs, formatting it compactly on a single line (e.g., [Goblin B: 4/7 HP remaining]). 
 Never speak or act on behalf of the players; state the immediate threat or environment and prompt them cleanly for their next action.
@@ -155,7 +155,7 @@ async function generateDMResponse({
 
   try {
     const cache = await ai.caches.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-light",
       displayName: uniqueCacheName,
       ttl: "1800s",
       contents: [{ role: "user", parts: [{ text: staticRuleset }] }]
@@ -169,7 +169,7 @@ async function generateDMResponse({
 
   // 3. Build execution configuration uniformly
   const generationConfig = { 
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-light",
     contents: history
   };
 
