@@ -12,6 +12,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const db = new Firestore();
 const CHAT_HISTORY_COLLECTION = "dnd_sessions";
 const GEMINI_MODEL_KEY = "gemini-3.1-flash-lite";
+const HISTORY_CONTEXT_LENGTH = 40;
 
 // Optimized system instructions to enforce tight, low-token outputs
 const SYSTEM_INSTRUCTION = `
@@ -522,7 +523,7 @@ app.post("/chat-bot", async (req, res) => {
       parts: [{ text: botReply }],
     });
 
-    if (history.length > 20) history = history.slice(-20);
+    if (history.length > HISTORY_CONTEXT_LENGTH) history = history.slice(-HISTORY_CONTEXT_LENGTH);
 
     await docRef.set(
       {
