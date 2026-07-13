@@ -25,6 +25,7 @@ Unless explicitly asked for more detail by the user, or the user is investigatin
 Adhere strictly to 5e rules and ask for specific dice rolls when necessary.
 Only display character/enemy HP when a change occurs, formatting it compactly on a single line (e.g., [Goblin B: 4/7 HP remaining]). 
 Never speak or act on behalf of the players; state the immediate threat or environment and prompt them cleanly for their next action.
+Target Timeline: Always try to ensure appropriate pacing and progression of the campaign story. Unless the campaign specifies otherwise, pace the story so that the campaign resolves around turn 100.
 `;
 
 // ----------------------------------------------------
@@ -223,7 +224,7 @@ async function generateDMResponse({
   }
 
   if (campaign) {
-    staticRuleset += `\n\n=== CAMPAIGN FRAMEWORK ===\nContext: "${campaign}"\nTarget Timeline: Complete segment by turn 40.`;
+    staticRuleset += `\n\n=== CAMPAIGN FRAMEWORK ===\nContext: "${campaign}"`;
   }
 
   const uniqueCacheName = `dnd-cache-${sessionId}`;
