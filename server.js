@@ -270,6 +270,8 @@ app.post("/command", async (req, res) => {
     if (payload?.commonEventObject?.hostApp !== "CHAT")
       return res.status(200).send();
 
+    console.log(`[INCOMING COMMAND PAYLOAD]: ${JSON.stringify(payload)}`);
+
     const {
       userMessage,
       threadContext,
@@ -529,18 +531,27 @@ app.post("/command", async (req, res) => {
           );
         }
       } else {
-        let cleanTarget = targetArg.toLowerCase();
+        // 🔍 Strategy A: Check the platform's annotations array for a structural mention
+        // This is the most reliable way to handle direct @mentions
+        const annotations =
+          payload.message?.annotations ||
+          payload.chat?.messagePayload?.message?.annotations ||
+          [];
 
-        // 🔍 Strategy A: Try to find a match by parsing a structured user ID @mention
-        if (cleanTarget.includes("users/")) {
-          const extractedId = targetArg.match(/users\/[a-zA-Z0-9]+/)?.[0];
-          if (extractedId && playerCards[extractedId]) {
-            foundPlayerKey = extractedId;
+        const userMention = annotations.find(
+          (ann) => ann.type === "USER_MENTION",
+        );
+
+        if (userMention && userMention.user?.name) {
+          const mentionedId = userMention.user.name; // This yields the exact 'users/213o4i...' string
+          if (playerCards[mentionedId]) {
+            foundPlayerKey = mentionedId;
           }
         }
 
-        // 🔍 Strategy B: Fallback to searching by character name or raw displayName text
+        // 🔍 Strategy B: Fallback if they typed a string name manually without a real app-mention link
         if (!foundPlayerKey) {
+          let cleanTarget = targetArg.toLowerCase().replace(/^@/, "").trim();
           foundPlayerKey = players.find((key) => {
             const char = playerCards[key];
             return (
@@ -563,10 +574,12 @@ app.post("/command", async (req, res) => {
 
       // 📜 Output the profile details
       const targetChar = playerCards[foundPlayerKey];
-      const invList = targetChar.inventory && targetChar.inventory.length > 0
+      const invList =
+        targetChar.inventory && targetChar.inventory.length > 0
           ? targetChar.inventory.map((i) => `• ${i}`).join("\n")
           : "_Empty_";
-      const spellList = targetChar.learnedSpells && targetChar.learnedSpells.length > 0
+      const spellList =
+        targetChar.learnedSpells && targetChar.learnedSpells.length > 0
           ? targetChar.learnedSpells.map((s) => `✨ ${s}`).join("\n")
           : "_No custom spells recorded_";
 
