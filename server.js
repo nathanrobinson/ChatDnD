@@ -501,22 +501,82 @@ app.post("/command", async (req, res) => {
 
     // 📄 COMMAND ID 8: SHOW CHARACTER SHEET
     else if (commandId === 8) {
+      const targetArg = userMessage.replace(/^(?:\/)?profile\s*/i, "").trim();
       const { playerCards } = await loadSessionData(docRef);
-      const activeChar = playerCards[userRefId];
-      if (!activeChar)
+      const players = Object.keys(playerCards);
+
+      if (players.length === 0) {
         return res.json(
           formatChatResponse(
-            `*The DM unrolls an empty scroll:* You do not have a character card registered. Use \`/register\`.`,
+            `*The DM surveys the tavern:* There are no characters registered in this session yet.`,
             threadContext,
           ),
         );
+      }
 
-      return res.json(
-        formatChatResponse(
-          `📄 **CHARACTER PROFILE: ${activeChar.playerName.toUpperCase()}**\n\n${activeChar.playerSheet}`,
-          threadContext,
-        ),
-      );
+      let foundPlayerKey = null;
+
+      // 👤 DEFAULT TO SELF: If no argument is passed, fetch the caller's own profile
+      if (!targetArg) {
+        if (playerCards[userRefId]) {
+          foundPlayerKey = userRefId;
+        } else {
+          return res.json(
+            formatChatResponse(
+              `*The DM looks down:* You haven't registered a character sheet in this session yet! Use \`/register\` first.`,
+              threadContext,
+            ),
+          );
+        }
+      } else {
+        let cleanTarget = targetArg.toLowerCase();
+
+        // 🔍 Strategy A: Try to find a match by parsing a structured user ID @mention
+        if (cleanTarget.includes("users/")) {
+          const extractedId = targetArg.match(/users\/[a-zA-Z0-9]+/)?.[0];
+          if (extractedId && playerCards[extractedId]) {
+            foundPlayerKey = extractedId;
+          }
+        }
+
+        // 🔍 Strategy B: Fallback to searching by character name or raw displayName text
+        if (!foundPlayerKey) {
+          foundPlayerKey = players.find((key) => {
+            const char = playerCards[key];
+            return (
+              char.playerName.toLowerCase().includes(cleanTarget) ||
+              key.toLowerCase().includes(cleanTarget)
+            );
+          });
+        }
+      }
+
+      // ❌ No player sheet matches the query
+      if (!foundPlayerKey) {
+        return res.json(
+          formatChatResponse(
+            `*The DM sifts through his scrolls:* I couldn't find a registered character matching "${targetArg}".`,
+            threadContext,
+          ),
+        );
+      }
+
+      // 📜 Output the profile details
+      const targetChar = playerCards[foundPlayerKey];
+      const invList = targetChar.inventory && targetChar.inventory.length > 0
+          ? targetChar.inventory.map((i) => `• ${i}`).join("\n")
+          : "_Empty_";
+      const spellList = targetChar.learnedSpells && targetChar.learnedSpells.length > 0
+          ? targetChar.learnedSpells.map((s) => `✨ ${s}`).join("\n")
+          : "_No custom spells recorded_";
+
+      let profileOutput = `📄 **CHARACTER PROFILE: ${targetChar.playerName.toUpperCase()}**\n`;
+      profileOutput += `*Controlled by:* ${foundPlayerKey === userRefId ? "You" : `<${foundPlayerKey}>`}\n\n`;
+      profileOutput += `${targetChar.playerSheet}\n\n`;
+      profileOutput += `🎒 **Current Inventory:**\n${invList}\n\n`;
+      profileOutput += `📖 **Unlocked Lore/Spells:**\n${spellList}`;
+
+      return res.json(formatChatResponse(profileOutput, threadContext));
     }
 
     return res.json(formatChatResponse("Unknown command.", threadContext));
